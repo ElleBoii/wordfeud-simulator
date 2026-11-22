@@ -1,0 +1,38 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+.venv/
+venv/
+
+# --- Bygg (C++/scikit-build, fas 3) ---
+build/
+dist/
+_skbuild/
+*.pyd
+*.so
+*.obj
+*.lib
+*.exp
+
+# --- Matcher (personliga, sparas lokalt) ---
+games/
+
+# --- Ordlista ---
+# Stora/nedladdade filer som återskapas med: python scripts/fetch_saldo.py
+dict/saldom.xml
+dict/*.part
+dict/words.txt
+dict/words_strict.txt
+# Kompilerad ordlista (byggs automatiskt)
+dict/*.bin
+# OBS: dict/added*.txt och dict/removed*.txt (dina rättelser) versionshanteras.
+
+# --- Editor / OS ---
+.vscode/
+.idea/
+.claude/settings.local.json
+Thumbs.db
+.DS_Store
+desktop.ini

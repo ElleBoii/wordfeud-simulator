@@ -1,0 +1,67 @@
+{
+  "_status": "Brickor, bonus, byte och matchslut verifierade mot wordfeud.com/wf/help och wordfeud.co/regler (se SPEC.md). Standardlayouten bekräftad av användaren.",
+  "language": "sv",
+  "alphabet": "ABCDEFGHIJKLMNOPQRSTUVWXYZÅÄÖ",
+
+  "tiles": {
+    "verified": true,
+    "blanks": 2,
+    "_comment": "letter: [antal, poäng]. Q och W har inga brickor men kan läggas med blank.",
+    "letters": {
+      "A": [9, 1],  "B": [2, 3],  "C": [1, 8], "D": [5, 1],  "E": [8, 1],
+      "F": [2, 3],  "G": [3, 2],  "H": [2, 3],  "I": [5, 1],  "J": [1, 7],
+      "K": [3, 3],  "L": [5, 2],  "M": [3, 3],  "N": [6, 1],  "O": [6, 2],
+      "P": [2, 4],  "Q": [0, 0],  "R": [8, 1],  "S": [8, 1],  "T": [9, 1],
+      "U": [3, 4],  "V": [2, 3],  "W": [0, 0],  "X": [1, 8],  "Y": [1, 7],
+      "Z": [1, 8],  "Å": [2, 4],  "Ä": [2, 4],  "Ö": [2, 4]
+    }
+  },
+
+  "rack_size": 7,
+
+  "bingo": {
+    "verified": true,
+    "_comment": "Bonus när man lägger 'tiles' brickor i ett drag.",
+    "tiles": 7,
+    "bonus": 40
+  },
+
+  "exchange": {
+    "verified": true,
+    "_comment": "Byte tillåts bara om påsen innehåller minst så här många brickor.",
+    "min_bag": 7
+  },
+
+  "end_of_game": {
+    "verified": true,
+    "_comment": "Matchen slutar när någon gått ut (tom hand och tom påse) eller efter consecutive_passes_to_end pass i rad totalt (båda spelarna). Lagt ord eller byte nollställer passräkningen; byte räknas inte som pass. Varje spelare tappar sina kvarvarande brickpoäng; den som gått ut får dessutom motståndarens.",
+    "consecutive_passes_to_end": 3,
+    "exchange_counts_as_pass": false,
+    "subtract_own_rack": true,
+    "going_out_adds_opponent_rack": true
+  },
+
+  "board": {
+    "size": 15,
+    "start": [7, 7],
+    "standard_layout_verified": true,
+    "_comment": "Rad för rad. '.' = ingen bonus, 'd' = DL, 't' = TL, 'D' = DW, 'T' = TW. Mittrutan är startruta.",
+    "standard_layout": [
+      "t...T..d..T...t",
+      ".d...t...t...d.",
+      "..D...d.d...D..",
+      "...t...D...t...",
+      "T...D.d.d.D...T",
+      ".t...t...t...t.",
+      "..d.d.....d.d..",
+      "d..D.......D..d",
+      "..d.d.....d.d..",
+      ".t...t...t...t.",
+      "T...D.d.d.D...T",
+      "...t...D...t...",
+      "..D...d.d...D..",
+      ".d...t...t...d.",
+      "t...T..d..T...t"
+    ]
+  }
+}

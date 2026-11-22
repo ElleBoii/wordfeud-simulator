@@ -1,0 +1,13 @@
+[project]
+name = "wfengine"
+version = "0.1.0"
+description = "Wordfeud-motor (svenska): draggenerering och Monte Carlo-analys"
+requires-python = ">=3.11"
+dependencies = ["fastapi", "uvicorn"]
+
+[project.optional-dependencies]
+dev = ["pytest", "httpx"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "tests"]
