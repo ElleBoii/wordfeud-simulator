@@ -12,7 +12,7 @@ from pathlib import Path
 
 from .board import Board, Placement
 from .dictionary import MODES, NORMAL
-from .rules import BLANK, Rules, update_pass_count, validate_layout
+from .rules import BLANK, Rules, check_bonus_counts, update_pass_count, validate_layout
 from .tiles import TileCountError, bag_count, unseen_tiles
 
 DEFAULT_GAMES_DIR = Path(__file__).resolve().parent.parent / "games"
@@ -67,6 +67,7 @@ class Game:
             raise ValueError(f"Okänd spelare: {starter}")
         layout = list(layout) if layout is not None else list(rules.standard_layout)
         validate_layout(layout, rules.size)
+        check_bonus_counts(layout, rules)
         if dict_mode not in MODES:
             raise ValueError(f"Okänt ordlisteläge: {dict_mode}")
         slug = re.sub(r"[^a-z0-9åäö]+", "-", name.lower()).strip("-")[:30] or "match"

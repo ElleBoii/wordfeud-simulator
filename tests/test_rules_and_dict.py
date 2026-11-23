@@ -1,3 +1,5 @@
+import pytest
+
 from wfengine import Dictionary, add_word, remove_word
 from wfengine.dictionary import build_dawg, normalize
 
@@ -125,3 +127,14 @@ def test_refresh_word_follows_correction_files(tmp_path, rules):
     add_word("hus", a, tmp_path)   # ångrar borttagningen
     normal.refresh_word("hus"); strict.refresh_word("hus")
     assert "HUS" in normal and "HUS" in strict
+
+
+def test_standard_layout_has_required_bonus_counts(rules):
+    from wfengine.rules import bonus_count_problems, check_bonus_counts
+    assert rules.bonus_counts == {"d": 24, "t": 20, "D": 12, "T": 8}
+    assert bonus_count_problems(rules.standard_layout, rules) == {}
+    check_bonus_counts(rules.standard_layout, rules)
+    empty = ["." * 15] * 15
+    assert bonus_count_problems(empty, rules) == {"d": (0, 24), "t": (0, 20), "D": (0, 12), "T": (0, 8)}
+    with pytest.raises(ValueError):
+        check_bonus_counts(empty, rules)

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import threading
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -12,7 +13,11 @@ from pydantic import BaseModel
 from wfengine import Dictionary, add_word, generate_moves, load_rules, rack_after, remove_word
 from wfengine.dictionary import (ADDED_FILE, ADDED_STRICT_FILE, BASE_FILES, DEFAULT_DICT_DIR,
                                  MODES, REMOVED_FILE, REMOVED_STRICT_FILE)
+from wfengine.evaluation import load_sim_config
 from wfengine.game import PLAYERS, Game, GameStore, interpret_word
+from wfengine.tiles import TileCountError
+
+from .simjobs import BudgetError, Settings, SettingsStore, SimManager
 
 STATIC = Path(__file__).resolve().parent / "static"
 
@@ -25,7 +30,7 @@ class DictCache:
         self._cache: dict[str, tuple[tuple, Dictionary]] = {}
         self._lock = threading.Lock()
 
-    def _stamp(self, mode: str) -> tuple:
+    def stamp(self, mode: str) -> tuple:
         files = [BASE_FILES[mode], ADDED_FILE, REMOVED_FILE, ADDED_STRICT_FILE, REMOVED_STRICT_FILE]
         out = []
         for f in files:
@@ -38,7 +43,7 @@ class DictCache:
 
     def get(self, mode: str) -> Dictionary:
         with self._lock:
-            stamp = self._stamp(mode)
+            stamp = self.stamp(mode)
             hit = self._cache.get(mode)
             if hit is None or hit[0] != stamp:
                 d = Dictionary.load(self.alphabet, self.dir, mode=mode)
@@ -51,7 +56,7 @@ class DictCache:
         with self._lock:
             for mode, (_, d) in list(self._cache.items()):
                 d.refresh_word(word)
-                self._cache[mode] = (self._stamp(mode), d)
+                self._cache[mode] = (self.stamp(mode), d)
 
     def preload(self, mode: str = "normal") -> None:
         if self.base_exists(mode):
@@ -106,13 +111,31 @@ class DictWord(BaseModel):
     mode: str = "normal"
 
 
-def create_app(games_dir: str | Path | None = None, dict_dir: str | Path | None = None) -> FastAPI:
+class SimInput(BaseModel):
+    settings: Settings | None = None     # None = sparade inställningar
+
+
+def create_app(games_dir: str | Path | None = None, dict_dir: str | Path | None = None,
+               sim_workers: int | None = None) -> FastAPI:
+    """sim_workers: antal processer för simuleringen (1 = i serverprocessen,
+    None = enligt inställningarna)."""
     rules = load_rules()
     store = GameStore(games_dir) if games_dir else GameStore()
     dict_dir = Path(dict_dir) if dict_dir else DEFAULT_DICT_DIR
     dicts = DictCache(rules.alphabet, dict_dir)
     dicts.preload()
-    app = FastAPI(title="Wordfeud-motor")
+    sim_cfg = load_sim_config()
+    settings = SettingsStore(store.dir.parent / "settings.json", sim_cfg.get("defaults", {}))
+    sims = SimManager(rules, sim_cfg, dicts, dict_dir, workers=sim_workers)
+
+    @asynccontextmanager
+    async def lifespan(_app):
+        yield
+        sims.shutdown()
+
+    app = FastAPI(title="Wordfeud-motor", lifespan=lifespan)
+    app.state.sims = sims
+    app.state.settings = settings
 
     # --- hjälpfunktioner -----------------------------------------------------
     def get_game(gid: str) -> Game:
@@ -190,6 +213,7 @@ def create_app(games_dir: str | Path | None = None, dict_dir: str | Path | None 
         return {"alphabet": rules.alphabet, "values": rules.values, "counts": rules.counts,
                 "size": rules.size, "start": rules.start, "rack_size": rules.rack_size,
                 "standard_layout": rules.standard_layout, "unverified": rules.unverified,
+                "bonus_counts": rules.bonus_counts,
                 "dict_modes": MODES,
                 "dict_available": {m: dicts.base_exists(m) for m in MODES}}
 
@@ -341,6 +365,63 @@ def create_app(games_dir: str | Path | None = None, dict_dir: str | Path | None 
         if not dicts.base_exists(g.dict_mode):
             notes.append("Ordlistan saknas – kör python scripts/fetch_saldo.py")
         return {"moves": out, "total_plays": len(plays), "notes": notes}
+
+    # --- inställningar och simulering ---------------------------------------------
+    @app.get("/api/settings")
+    def get_settings():
+        return settings.load().model_dump()
+
+    @app.put("/api/settings")
+    def put_settings(body: Settings):
+        return settings.save(body).model_dump()
+
+    @app.post("/api/games/{gid}/simulate")
+    def simulate(gid: str, body: SimInput):
+        g = get_game(gid)
+        if not g.rack:
+            raise HTTPException(400, "Fyll i din hand först")
+        if g.to_move != "me":
+            raise HTTPException(400, "Simuleringen kräver att det är din tur")
+        if g.game_over_reason(rules):
+            raise HTTPException(400, "Matchen är slut")
+        if not dicts.base_exists(g.dict_mode):
+            raise HTTPException(400, "Ordlistan saknas – kör python scripts/fetch_saldo.py")
+        s = body.settings or settings.load()
+        try:
+            job_id, sim, notes, est = sims.start(g, s)
+        except TileCountError as e:
+            raise HTTPException(400, f"Felinmatat: {e}")
+        except BudgetError as e:
+            raise HTTPException(400, str(e))
+        return {"job": job_id, "notes": notes, "estimate": est, **sim.snapshot()}
+
+    @app.get("/api/games/{gid}/estimate")
+    def estimate(gid: str):
+        """Max antal iterationer inom tidsbudgeten för varje val av drag framåt."""
+        g = get_game(gid)
+        if not g.rack:
+            raise HTTPException(400, "Fyll i din hand först")
+        if not dicts.base_exists(g.dict_mode):
+            raise HTTPException(400, "Ordlistan saknas – kör python scripts/fetch_saldo.py")
+        try:
+            return sims.estimate(g, settings.load())
+        except TileCountError as e:
+            raise HTTPException(400, f"Felinmatat: {e}")
+
+    @app.get("/api/sim/{job_id}")
+    def sim_status(job_id: str):
+        sim = sims.get(job_id)
+        if sim is None:
+            raise HTTPException(404, "Simuleringen finns inte")
+        return {"job": job_id, **sim.snapshot()}
+
+    @app.post("/api/sim/{job_id}/stop")
+    def sim_stop(job_id: str):
+        sim = sims.get(job_id)
+        if sim is None:
+            raise HTTPException(404, "Simuleringen finns inte")
+        sim.stop()
+        return {"job": job_id, **sim.snapshot()}
 
     # --- ordlista ---------------------------------------------------------------
     @app.get("/api/dict/check")

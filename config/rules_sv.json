@@ -44,6 +44,9 @@
   "board": {
     "size": 15,
     "start": [7, 7],
+    "bonus_counts_verified": true,
+    "_bonus_counts": "Exakt antal bonusrutor av varje sort som ett matchbräde måste ha (bekräftat av användaren). Slumpade bräden lägger aldrig bonus på startrutan.",
+    "bonus_counts": {"d": 24, "t": 20, "D": 12, "T": 8},
     "standard_layout_verified": true,
     "_comment": "Rad för rad. '.' = ingen bonus, 'd' = DL, 't' = TL, 'D' = DW, 'T' = TW. Mittrutan är startruta.",
     "standard_layout": [

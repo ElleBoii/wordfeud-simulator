@@ -89,3 +89,25 @@ tbody tr.chosen { background: #fff3c4; }
 .expanel { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
 .racktiles.pick .rt { cursor: pointer; }
 .racktiles.pick .rt.picked { background: #fbd38d; transform: translateY(-4px); box-shadow: 0 0 0 2px #b7791f; }
+
+/* simulering */
+.simset { margin: 6px 0; }
+.simset summary { cursor: pointer; color: var(--accent); font-size: .9rem; }
+.simset .row { margin-top: 6px; }
+.se { color: var(--muted); font-size: .75rem; margin-left: 2px; }
+tbody tr.pruned td { color: #aaa; }
+tbody tr.sep td { font-size: .8rem; color: var(--muted); background: #f7f5f0; cursor: default; }
+
+/* bonus-checklista (ny match) */
+.checklist { margin-top: 12px; display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 4px 10px; }
+.checklist .ci { display: flex; align-items: center; gap: 6px; font-size: .9rem; padding: 3px 0; }
+.checklist .ci.ok { color: var(--ok); }
+.checklist .ci.miss { color: #b7791f; }
+.checklist .ci.over { color: var(--danger); }
+.checklist .chip { display: inline-block; min-width: 2.2em; text-align: center; padding: 2px 4px; border-radius: 3px; font-size: .75rem; font-weight: 700; color: #222; }
+.checklist .chip.dl { background: var(--dl); } .checklist .chip.tl { background: var(--tl); color: #fff; }
+.checklist .chip.dw { background: var(--dw); } .checklist .chip.tw { background: var(--tw); color: #fff; }
+.checklist .csum { grid-column: 1 / -1; font-size: .9rem; margin-top: 2px; }
+
+.estimate { margin-top: 8px; line-height: 1.4; }
+select option:disabled { color: #aaa; }

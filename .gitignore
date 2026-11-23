@@ -18,6 +18,8 @@ _skbuild/
 
 # --- Matcher (personliga, sparas lokalt) ---
 games/
+# Sparade analysinställningar
+settings.json
 
 # --- Ordlista ---
 # Stora/nedladdade filer som återskapas med: python scripts/fetch_saldo.py

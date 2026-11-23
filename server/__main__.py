@@ -29,7 +29,11 @@ def main() -> None:
 
     from server.app import create_app
     app = create_app()
+    s = app.state.settings.load()
+    n = app.state.sims.n_workers(s)
+    app.state.sims.warm(s)      # startar simuleringsprocesserna och laddar ordlistan i dem
     print()
+    print(f"  Simulering: {n} {'process' if n == 1 else 'processer'}")
     print(f"  På datorn:  http://localhost:{args.port}")
     print(f"  På mobilen: http://{lan_ip()}:{args.port}   (samma wifi)")
     print()

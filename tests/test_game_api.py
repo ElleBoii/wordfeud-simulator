@@ -45,9 +45,31 @@ def test_create_and_list(client):
     assert client.get(f"/api/games/{g['id']}").json()["tile_status"]["bag"] == 104 - 7
 
 
+def std_with_tl_at(row, col):
+    """Standardlayouten med en TL flyttad till (row, col) – antalet bonusrutor stämmer."""
+    from wfengine import load_rules
+    lay = [list(r) for r in load_rules().standard_layout]
+    assert lay[row][col] == "." and lay[0][0] == "t"
+    lay[0][0], lay[row][col] = ".", "t"
+    return ["".join(r) for r in lay]
+
+
 def test_custom_layout_validated(client):
     r = client.post("/api/games", json={"name": "x", "layout": ["." * 15] * 14})
     assert r.status_code == 400
+
+
+def test_bonus_counts_required(client):
+    cfg = client.get("/api/config").json()
+    assert cfg["bonus_counts"] == {"d": 24, "t": 20, "D": 12, "T": 8}
+    r = client.post("/api/games", json={"name": "x", "layout": ["." * 15] * 15})
+    assert r.status_code == 400
+    assert "DL: 0/24 (24 saknas)" in r.json()["detail"] and "TW: 0/8 (8 saknas)" in r.json()["detail"]
+    lay = [list(row) for row in cfg["standard_layout"]]
+    lay[7][7] = "T"                                    # en TW för mycket
+    r = client.post("/api/games", json={"name": "x", "layout": ["".join(x) for x in lay]})
+    assert r.status_code == 400 and "TW: 9/8 (1 för många)" in r.json()["detail"]
+    assert client.post("/api/games", json={"name": "x", "layout": std_with_tl_at(7, 6)}).status_code == 200
 
 
 def test_preview_and_play(client):
@@ -160,7 +182,7 @@ def test_lowercase_word_is_not_blanks(client):
 
 
 def test_auto_blank_for_missing_letter(client):
-    gid = new_game(client, layout=["." * 15] * 7 + ["......t........"] + ["." * 15] * 7)["id"]
+    gid = new_game(client, layout=std_with_tl_at(7, 6))["id"]
     client.patch(f"/api/games/{gid}", json={"rack": "HS?ABCD"})
     # HUS: U saknas i handen -> blank som U.
     p = client.post(f"/api/games/{gid}/preview", json={"row": 7, "col": 6, "horizontal": True, "word": "hus"}).json()

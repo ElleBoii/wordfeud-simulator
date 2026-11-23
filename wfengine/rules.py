@@ -29,6 +29,7 @@ class Rules:
     start: tuple[int, int]
     standard_layout: tuple[str, ...]
     end_of_game: dict = field(default_factory=dict)
+    bonus_counts: dict = field(default_factory=dict)   # krav per bonuskod, t.ex. {"d": 24}
     unverified: tuple[str, ...] = ()   # sektioner som ännu inte verifierats
 
     @property
@@ -56,6 +57,12 @@ def load_rules(path: str | Path = DEFAULT_CONFIG) -> Rules:
     size = int(board["size"])
     layout = tuple(board["standard_layout"])
     validate_layout(layout, size)
+    bonus_counts = {k: int(v) for k, v in board.get("bonus_counts", {}).items()}
+    bad_codes = set(bonus_counts) - (BONUS_CODES - {NONE})
+    if bad_codes:
+        raise ValueError(f"Okända bonuskoder i bonus_counts: {sorted(bad_codes)}")
+    if sum(bonus_counts.values()) > size * size - 1:
+        raise ValueError("bonus_counts kräver fler bonusrutor än brädet har")
 
     unverified = tuple(
         name for name, ok in [
@@ -64,6 +71,7 @@ def load_rules(path: str | Path = DEFAULT_CONFIG) -> Rules:
             ("exchange", data["exchange"].get("verified")),
             ("end_of_game", data["end_of_game"].get("verified")),
             ("standard_layout", board.get("standard_layout_verified")),
+            ("bonus_counts", board.get("bonus_counts_verified") or not bonus_counts),
         ] if not ok
     )
 
@@ -79,6 +87,7 @@ def load_rules(path: str | Path = DEFAULT_CONFIG) -> Rules:
         start=tuple(board["start"]),
         standard_layout=layout,
         end_of_game={k: v for k, v in data["end_of_game"].items() if not k.startswith("_")},
+        bonus_counts=bonus_counts,
         unverified=unverified,
     )
 
@@ -89,6 +98,31 @@ def validate_layout(layout, size: int) -> None:
     bad = {c for row in layout for c in row} - BONUS_CODES
     if bad:
         raise ValueError(f"Okända bonuskoder i layout: {sorted(bad)}")
+
+
+BONUS_NAMES = {DL: "DL", TL: "TL", DW: "DW", TW: "TW"}
+
+
+def bonus_count_problems(layout, rules: Rules) -> dict[str, tuple[int, int]]:
+    """Bonussorter vars antal inte stämmer: {kod: (har, krävs)}. Tomt = godkänt."""
+    have = {k: 0 for k in rules.bonus_counts}
+    for row in layout:
+        for ch in row:
+            if ch in have:
+                have[ch] += 1
+    return {k: (have[k], need) for k, need in rules.bonus_counts.items() if have[k] != need}
+
+
+def check_bonus_counts(layout, rules: Rules) -> None:
+    """Kastar ValueError om brädet inte har rätt antal bonusrutor av varje sort."""
+    problems = bonus_count_problems(layout, rules)
+    if problems:
+        parts = []
+        for k, (have, need) in problems.items():
+            diff = need - have
+            what = f"{diff} saknas" if diff > 0 else f"{-diff} för många"
+            parts.append(f"{BONUS_NAMES[k]}: {have}/{need} ({what})")
+        raise ValueError("Fel antal bonusrutor – " + ", ".join(parts))
 
 
 # --- Matchslut ---------------------------------------------------------------

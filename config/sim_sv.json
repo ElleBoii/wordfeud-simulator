@@ -1,0 +1,59 @@
+{
+  "_status": "Heuristiska startvärden (version 1), inte tränade. Justera fritt. Leave-tabellen (version 2) kan läggas i en separat fil, se leave.table_file.",
+
+  "leave": {
+    "_comment": "Värdet av brickorna som blir kvar på hand, i poäng. tiles = värde per bricka (första exemplaret). duplicate = straff per extra exemplar av samma bokstav (blank har eget). Vokalbalans: straff per steg som |vokaler - konsonanter| överstiger balance_free. Q och W saknas som brickor.",
+    "tiles": {
+      "?": 15, "S": 3, "E": 2.5, "R": 2, "N": 2, "T": 1.5, "A": 1.5, "L": 1, "D": 0.5,
+      "I": 0.5, "K": 0, "O": 0, "G": -1, "M": -0.5, "B": -2, "F": -2, "H": -1.5,
+      "P": -2.5, "V": -3, "U": -2.5, "Å": -3, "Ä": -2, "Ö": -3,
+      "J": -6, "Y": -6, "C": -8, "X": -6, "Z": -7, "Q": -10, "W": -10
+    },
+    "duplicate": 3.5,
+    "duplicate_blank": 5,
+    "vowels": "AEIOUYÅÄÖ",
+    "balance_free": 1,
+    "balance_penalty": 2.5,
+    "empty_bag_factor": 1.0,
+    "table_file": "config/leaves_table_sv.json"
+  },
+
+  "winmodel": {
+    "_comment": "P(vinst) = Φ((marginal + turbonus) / σ), σ = max(sigma_min, sigma_per_sqrt_tile * sqrt(osedda brickor)). Turbonus: +turn_bonus om jag är på tur, annars −turn_bonus, skalas ned när påsen tar slut.",
+    "sigma_per_sqrt_tile": 7.0,
+    "sigma_min": 4.0,
+    "turn_bonus": 12.0
+  },
+
+  "opponent": {
+    "_comment": "Mänsklig modell: softmax över de top_n bästa dragen (statisk värdering) med temperatur i poäng.",
+    "human_top_n": 10,
+    "human_temperature": 8.0
+  },
+
+  "budget": {
+    "_comment": "Simuleringen får ta högst max_seconds. Max antal iterationer uppskattas före start ur en kalibrering i aktuell ställning (se wfengine/budget.py) och siktar på safety × max_seconds. parallel_efficiency = uppmätt verkningsgrad med flera processer (7 processer gav ~5,2× en). cost_factor kan höjas om simuleringarna i praktiken tar längre tid än uppskattat. max_seconds är också en hård gräns under körningen.",
+    "max_seconds": 60,
+    "safety": 0.85,
+    "parallel_efficiency": 0.75,
+    "rollout_overhead_seconds": 0.002,
+    "cost_factor": 1.0,
+    "max_iterations": 5000,
+    "calibration_plain_samples": 4,
+    "calibration_blank_samples": 2,
+    "calibration_max_leaves": 6
+  },
+
+  "defaults": {
+    "_comment": "plies: 1–5, 10 eller 0 = till slutet. iterations: 0 = max som ryms inom tidsbudgeten.",
+    "opponent_model": "perfect",
+    "plies": 2,
+    "candidates": 15,
+    "iterations": 0,
+    "sort": "win",
+    "include_exchanges": true,
+    "seed": 1,
+    "prune": true,
+    "workers": 0
+  }
+}

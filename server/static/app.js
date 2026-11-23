@@ -38,6 +38,8 @@ function debounce(fn, ms) {
   return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
 }
 
+const PLIES = [1, 2, 3, 4, 5, 10, 0];                  // 0 = till slutet
+const pliesName = p => p === 0 ? "Till slutet" : String(p);
 const pos = (r, c, h) => `rad ${r + 1}, kol ${c + 1} ${h ? "→" : "↓"}`;
 const fmtDate = s => s ? s.replace("T", " ").slice(0, 16) : "";
 const tileValue = (letter, blank) => blank ? 0 : (CFG.values[letter] ?? 0);
@@ -126,24 +128,72 @@ function viewNew() {
       <div><div class="board" id="board"></div></div>
       <div class="panel">
         <h3>Bonusrutor</h3>
-        <p class="muted">Välj typ och klicka på rutorna. Stämmer brädet med standardlayouten behöver du inte ändra något.</p>
+        <p class="muted">Välj typ och klicka på rutorna, eller slumpa ett bräde. Stämmer brädet med standardlayouten behöver du inte ändra något.</p>
         <div class="row palette" id="pal">
           ${[".", "d", "t", "D", "T"].map(k => `<button data-k="${k}" class="${BONUS[k][0]}">${BONUS[k][1] || "Ingen"}</button>`).join("")}
         </div>
         <div class="row" style="margin-top:8px">
-          <button id="std">Standardlayout</button><button id="clear">Töm</button>
+          <button id="std">Standardlayout</button><button id="rnd">Slumpa bräde</button><button id="clear">Töm</button>
         </div>
+        <div class="checklist" id="check"></div>
         <div class="row" style="margin-top:14px"><button class="primary" id="create">Skapa match</button></div>
       </div>
     </div>`;
+  // Manuella ändringar sedan senaste standard/slump/töm – skyddas av en bekräftelsefråga.
+  let manual = false;
+  const NEED = CFG.bonus_counts || {};
+  const problems = () => {
+    const have = {};
+    for (const row of layout) for (const ch of row) have[ch] = (have[ch] || 0) + 1;
+    return Object.entries(NEED).map(([k, need]) => ({ k, have: have[k] || 0, need }));
+  };
+  const drawCheck = () => {
+    const items = problems();
+    const ok = items.every(x => x.have === x.need);
+    $("#check").innerHTML = items.map(({ k, have, need }) => {
+      const d = need - have;
+      const [cls, txt] = d === 0 ? ["ok", "✓"] : d > 0 ? ["miss", `${d} saknas`] : ["over", `${-d} för många`];
+      return `<div class="ci ${cls}"><span class="chip ${BONUS[k][0]}">${BONUS[k][1]}</span>
+        <span class="mono">${have}/${need}</span> <span>${txt}</span></div>`;
+    }).join("") + `<div class="${ok ? "okc" : "error"} csum">${ok ? "Brädet är godkänt." : "Brädet godkänns först när antalet av varje sort stämmer."}</div>`;
+    $("#create").disabled = !ok;
+  };
   const draw = () => {
     $("#board").innerHTML = boardHTML(layout.map(r => r.join("")));
     app.querySelectorAll("#pal button").forEach(b => b.classList.toggle("on", b.dataset.k === brush));
+    drawCheck();
   };
-  onSquare($("#board"), (r, c) => { layout[r][c] = brush; draw(); });
+  const overwrite = (what) => !manual || confirm(`Du har ändrat bonusrutor för hand. Vill du ${what} och skriva över det du lagt ut?`);
+  const randomLayout = () => {
+    const N = CFG.size, [sr, sc] = CFG.start;
+    const cells = [];
+    for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) if (r !== sr || c !== sc) cells.push([r, c]);
+    for (let i = cells.length - 1; i > 0; i--) {           // Fisher–Yates
+      const j = Math.floor(Math.random() * (i + 1));
+      [cells[i], cells[j]] = [cells[j], cells[i]];
+    }
+    const out = Array.from({ length: N }, () => Array(N).fill("."));
+    let i = 0;
+    for (const [k, n] of Object.entries(NEED)) for (let x = 0; x < n; x++) { const [r, c] = cells[i++]; out[r][c] = k; }
+    return out;
+  };
+  onSquare($("#board"), (r, c) => {
+    if (layout[r][c] !== brush) { layout[r][c] = brush; manual = true; }
+    draw();
+  });
   $("#pal").onclick = e => { const b = e.target.closest("button"); if (b) { brush = b.dataset.k; draw(); } };
-  $("#std").onclick = () => { layout = CFG.standard_layout.map(r => r.split("")); draw(); };
-  $("#clear").onclick = () => { layout = layout.map(r => r.map(() => ".")); draw(); };
+  $("#std").onclick = () => {
+    if (!overwrite("använda standardlayouten")) return;
+    layout = CFG.standard_layout.map(r => r.split("")); manual = false; draw();
+  };
+  $("#rnd").onclick = () => {
+    if (!overwrite("slumpa ett nytt bräde")) return;
+    layout = randomLayout(); manual = false; draw();
+  };
+  $("#clear").onclick = () => {
+    if (!overwrite("tömma brädet")) return;
+    layout = layout.map(r => r.map(() => ".")); manual = false; draw();
+  };
   $("#create").onclick = async () => {
     try {
       const g = await api("POST", "/api/games", {
@@ -160,7 +210,8 @@ function viewNew() {
 const S = {};   // tillstånd för matchvyn
 
 async function viewGame(id) {
-  Object.assign(S, { id, game: null, sel: null, player: "me", preview: null, analysis: null, chosen: null, ex: null });
+  stopSim();
+  Object.assign(S, { id, game: null, sel: null, player: "me", preview: null, analysis: null, chosen: null, ex: null, sim: null, simNote: null, estimate: null });
   S.game = await api("GET", `/api/games/${id}`);
   app.innerHTML = `
     <div id="banners"></div>
@@ -206,10 +257,32 @@ async function viewGame(id) {
         <div class="panel">
           <div class="row">
             <h3 class="grow">Analys</h3>
-            <label><input type="checkbox" id="inclex" checked> byten/pass</label>
             <button class="primary" id="analyze">Analysera</button>
+            <button id="simstop" class="hidden">Stoppa</button>
           </div>
-          <div id="analysis"><p class="muted">Rankar alla lagliga drag efter poäng. Vinstchans kommer med simuleringen (fas 4).</p></div>
+          <details id="simset" class="simset">
+            <summary>Inställningar</summary>
+            <div class="row">
+              <label>Motståndare <select id="st-opp">
+                <option value="perfect">Perfekt</option><option value="human">Mänsklig</option></select></label>
+              <label title="Drag efter ditt drag, växelvis: motståndaren först, sedan du osv.">Drag framåt <select id="st-plies">${PLIES.map(p => `<option value="${p}">${pliesName(p)}</option>`).join("")}</select></label>
+              <label>Kandidater <input type="number" id="st-cand" min="1" max="60" class="score"></label>
+            </div>
+            <div class="row">
+              <label title="Tomt eller 0 = så många som ryms inom tidsbudgeten">Iterationer <input type="number" id="st-iter" min="0" class="score" placeholder="max"></label>
+              <span class="muted" id="st-itermax"></span>
+              <label>Sortera <select id="st-sort">
+                <option value="win">vinstchans</option><option value="margin">marginal</option></select></label>
+            </div>
+            <div class="row">
+              <label><input type="checkbox" id="inclex"> byten/pass</label>
+              <label><input type="checkbox" id="st-prune"> gallra dåliga drag</label>
+              <label>Seed <input type="number" id="st-seed" class="score"></label>
+              <label title="0 = automatiskt (antal kärnor − 1)">Processer <input type="number" id="st-workers" min="0" max="61" class="score"></label>
+            </div>
+            <div class="muted estimate" id="st-est"></div>
+          </details>
+          <div id="analysis"><p class="muted">Analysera rankar alla drag efter poäng och simulerar sedan de bästa (vinstchans och marginal).</p></div>
         </div>
         <div class="panel">
           <h3>Brickor</h3>
@@ -236,6 +309,7 @@ async function viewGame(id) {
   bindGame();
   renderGame();
   setPlayer(S.game.to_move);
+  loadSettings().catch(fail);
 }
 
 function renderGame() {
@@ -315,8 +389,16 @@ function renderPreview() {
   });
 }
 
+const refetchEstimate = debounce(() => fetchEstimate(), 600);
+
 async function refreshGame(g) {
+  const before = S.game ? JSON.stringify([S.game.rack, S.game.tiles, S.game.dict_mode]) : null;
   S.game = g || await api("GET", `/api/games/${S.id}`);
+  if (before !== JSON.stringify([S.game.rack, S.game.tiles, S.game.dict_mode])) {
+    S.estimate = null;                         // ställningen har ändrats
+    renderEstimate();
+    if ($("#simset") && $("#simset").open) refetchEstimate();
+  }
   renderGame();
   setPlayer(S.game.to_move);
   if (S.ex) {
@@ -405,8 +487,7 @@ async function doExchange(what) {
   try {
     const g = await api("POST", `/api/games/${S.id}/exchange`, { player: who, ...what });
     closeExchange();
-    S.analysis = null; S.chosen = null;
-    $("#analysis").innerHTML = "";
+    clearAnalysis();
     await refreshGame(g);
     if (who === "me") {
       toast("Byte registrerat – fyll i dina nya brickor");
@@ -452,13 +533,14 @@ function bindGame() {
   $("#passbtn").onclick = async () => {
     try {
       await refreshGame(await api("POST", `/api/games/${S.id}/pass`, { player: S.player }));
+      clearAnalysis();
       toast(`Pass registrerat – ${S.player === "me" ? "motståndarens" : "din"} tur`);
       closeExchange();
     } catch (e) { fail(e); }
   };
   $("#exbtn").onclick = () => S.ex ? closeExchange() : openExchange();
   $("#undo").onclick = async () => {
-    try { await refreshGame(await api("POST", `/api/games/${S.id}/undo`)); toast("Ångrat"); S.analysis = null; }
+    try { await refreshGame(await api("POST", `/api/games/${S.id}/undo`)); toast("Ångrat"); clearAnalysis(); }
     catch (e) { fail(e); }
   };
 
@@ -481,6 +563,10 @@ function bindGame() {
   };
 
   $("#analyze").onclick = analyze;
+  $("#simstop").onclick = () => stopSim(false);
+  ["#st-opp", "#st-plies", "#st-cand", "#st-iter", "#st-sort", "#inclex", "#st-prune", "#st-seed", "#st-workers"]
+    .forEach(sel => $(sel).addEventListener("change", saveSettings));
+  $("#simset").addEventListener("toggle", () => { if ($("#simset").open && !S.estimate) fetchEstimate(); });
 
   const dictCall = async (action) => {
     const word = $("#dword").value.trim();
@@ -511,9 +597,9 @@ async function playWord() {
   try {
     const r = await api("POST", `/api/games/${S.id}/play`, { ...S.sel, word: $("#word").value.trim(), player: S.player });
     $("#word").value = "";
-    S.preview = null; S.chosen = null; S.analysis = null; S.sel = null;
+    S.preview = null; S.sel = null;
+    clearAnalysis();
     await refreshGame(r.game);
-    $("#analysis").innerHTML = "";
     const extra = r.warnings.filter(w => w.startsWith("Handen"));
     toast(`${r.score} p` + (extra.length ? " – " + extra.join("; ") : ""));
 
@@ -521,43 +607,219 @@ async function playWord() {
 }
 
 // ---------- analys ----------
+const moveKey = m => m.kind + "|" + m.exchanged + "|" +
+  m.placements.map(p => `${p.row},${p.col},${p.letter},${p.blank ? 1 : 0}`).join(";");
+
+async function loadSettings() {
+  S.settings = await api("GET", "/api/settings");
+  const st = S.settings;
+  $("#st-opp").value = st.opponent_model;
+  $("#st-plies").value = String(st.plies);
+  $("#st-cand").value = st.candidates;
+  $("#st-iter").value = st.iterations || "";
+  $("#st-sort").value = st.sort;
+  $("#inclex").checked = st.include_exchanges;
+  $("#st-prune").checked = st.prune;
+  $("#st-seed").value = st.seed;
+  $("#st-workers").value = st.workers;
+  renderEstimate();
+}
+
+async function saveSettings(e) {
+  if (!S.settings) return;
+  const st = { ...S.settings };
+  st.opponent_model = $("#st-opp").value;
+  st.plies = +$("#st-plies").value;
+  st.candidates = Math.min(60, Math.max(1, Math.round(+$("#st-cand").value || 15)));
+  st.iterations = Math.max(0, Math.round(+$("#st-iter").value || 0));
+  st.sort = $("#st-sort").value;
+  st.include_exchanges = $("#inclex").checked;
+  st.prune = $("#st-prune").checked;
+  st.seed = Math.round(+$("#st-seed").value || 0);
+  st.workers = Math.max(0, Math.round(+$("#st-workers").value || 0));
+  try { S.settings = await api("PUT", "/api/settings", st); toast("Inställningar sparade"); }
+  catch (err) { return fail(err); }
+  // Antal kandidater, byten och processer påverkar hur många iterationer som ryms.
+  if (e && ["st-cand", "inclex", "st-workers"].includes(e.target.id)) { S.estimate = null; fetchEstimate(); }
+  else renderEstimate();
+}
+
+// ---------- tidsbudget ----------
+async function fetchEstimate() {
+  if (!S.game || !S.game.rack || !$("#simset").open) return renderEstimate();
+  const gid = S.id, rack = S.game.rack;
+  $("#st-est").textContent = "Beräknar hur många iterationer som ryms…";
+  try {
+    const est = await api("GET", `/api/games/${gid}/estimate`);
+    if (S.id === gid && S.game.rack === rack) { S.estimate = est; }
+  } catch (e) { S.estimate = { error: e.message }; }
+  renderEstimate();
+}
+
+function renderEstimate() {
+  const el = $("#st-est"), sel = $("#st-plies");
+  if (!el || !sel) return;
+  const est = S.estimate;
+  const byPlies = {};
+  if (est && est.options) for (const o of est.options) byPlies[o.plies] = o;
+  for (const opt of sel.options) {
+    const o = byPlies[opt.value];
+    opt.disabled = !!o && !o.feasible;
+    opt.textContent = pliesName(+opt.value) + (o ? (o.feasible ? ` (max ${o.max_iterations} it.)` : " (ryms ej)") : "");
+  }
+  const cur = S.settings ? byPlies[S.settings.plies] : null;
+  $("#st-itermax").textContent = cur ? (cur.feasible ? `max ${cur.max_iterations} på ${est.max_seconds} s` : "ryms inte") : "";
+  if (!est) {
+    el.textContent = S.game && S.game.rack ? "" : "Fyll i handen för att se hur många iterationer som ryms.";
+    return;
+  }
+  if (est.error) { el.innerHTML = `<span class="error">${esc(est.error)}</span>`; return; }
+  el.innerHTML = `Uppskattning för ställningen: ca ${est.moves_left} drag kvar i matchen ·
+    ${est.ply_ms} ms per motståndardrag${est.blank_share ? ` (blank i ${Math.round(100 * est.blank_share)} % av händerna)` : ""} ·
+    ${est.kept_blanks ? `${est.kept_blanks} ${est.kept_blanks === 1 ? "kandidat sparar" : "kandidater sparar"} blank (ditt nästa drag upp till ${Math.round(est.kept_blank_ply_ms)} ms) ·` : ""}
+    ${est.candidates} kandidater · ${est.workers} ${est.workers === 1 ? "process" : "processer"} · max ${est.max_seconds} s.
+    ${cur && !cur.feasible ? `<div class="error">${esc(pliesName(S.settings.plies))} ryms inte inom ${est.max_seconds} s – välj färre drag framåt eller färre kandidater.</div>` : ""}`;
+}
+
+function stopSim(forget = true) {
+  if (S.simTimer) { clearTimeout(S.simTimer); S.simTimer = null; }
+  if (S.sim && S.sim.status === "running") {
+    api("POST", `/api/sim/${S.sim.job}/stop`).then(r => {
+      if (!forget && S.sim && S.sim.job === r.job) { S.sim = { ...r, notes: S.sim.notes }; renderAnalysis(); }
+    }).catch(() => {});
+  }
+  if (forget) S.sim = null;
+  const b = $("#simstop");
+  if (b) b.classList.add("hidden");
+}
+
+function clearAnalysis() {
+  stopSim();
+  S.analysis = null; S.chosen = null; S.simNote = null;
+  const el = $("#analysis");
+  if (el) el.innerHTML = "";
+}
+
 async function analyze() {
   const btn = $("#analyze");
   btn.disabled = true; btn.textContent = "Analyserar…";
+  stopSim();
   try {
     const t0 = performance.now();
     const inc = $("#inclex").checked;
     S.analysis = await api("POST", `/api/games/${S.id}/analyze`, { include_exchanges: inc, include_pass: inc, limit: 100 });
     S.analysis.ms = Math.round(performance.now() - t0);
     S.chosen = null;
+    S.simNote = null;
+    if (S.game.game_over) S.simNote = null;
+    else if (S.game.to_move !== "me") S.simNote = "Simuleringen körs när det är din tur.";
+    else {
+      try {
+        S.sim = await api("POST", `/api/games/${S.id}/simulate`, {});
+        S.estimate = S.sim.estimate;
+        renderEstimate();
+        $("#simstop").classList.remove("hidden");
+        pollSim();
+      } catch (e) {
+        S.simNote = "Ingen simulering: " + e.message;
+        S.estimate = null;
+        if ($("#simset").open) fetchEstimate(); else $("#simset").open = true;   // visa vad som ryms
+      }
+    }
     renderAnalysis();
   } catch (e) { fail(e); }
   finally { btn.disabled = false; btn.textContent = "Analysera"; }
 }
 
+function pollSim() {
+  S.simTimer = setTimeout(async () => {
+    if (!S.sim) return;
+    const job = S.sim.job, notes = S.sim.notes;
+    let r;
+    try { r = await api("GET", `/api/sim/${job}`); }
+    catch (e) { S.simTimer = null; return fail(e); }
+    if (!S.sim || S.sim.job !== job) return;      // ny analys har startats
+    S.sim = { ...r, notes };
+    renderAnalysis();
+    if (r.status === "running" || r.status === "pending") pollSim();
+    else {
+      S.simTimer = null;
+      $("#simstop").classList.add("hidden");
+      if (r.status === "error") toast("Simuleringen misslyckades: " + r.error, true);
+    }
+  }, 700);
+}
+
+function moveCells(m) {
+  const what = m.kind === "play" ? `<span class="mono">${esc(m.word)}</span>` : m.kind === "pass" ? "Pass" : `Byt <span class="mono">${esc(m.exchanged)}</span>`;
+  const where = m.kind === "play" ? pos(m.row, m.col, m.horizontal) : "";
+  return `<td>${what}</td><td class="muted">${where}</td><td class="num">${m.kind === "play" ? m.score : ""}</td>
+      <td class="mono">${esc(m.leave) || "–"}</td>`;
+}
+
+const signed = x => (x > 0 ? "+" : "") + x.toFixed(1);
+
 function renderAnalysis() {
   const a = S.analysis;
   if (!a) return;
-  const rows = a.moves.map((m, i) => {
-    const what = m.kind === "play" ? `<span class="mono">${esc(m.word)}</span>` : m.kind === "pass" ? "Pass" : `Byt <span class="mono">${esc(m.exchanged)}</span>`;
-    const where = m.kind === "play" ? pos(m.row, m.col, m.horizontal) : "";
-    return `<tr data-i="${i}" class="${S.chosen === m ? "chosen" : ""}">
-      <td>${what}</td><td class="muted">${where}</td><td class="num">${m.kind === "play" ? m.score : ""}</td>
-      <td class="mono">${esc(m.leave) || "–"}</td><td class="num muted">–</td><td class="num muted">–</td><td class="num muted">–</td></tr>`;
-  }).join("");
+  const sim = S.sim;
+  const chosenKey = S.chosen ? moveKey(S.chosen) : null;
+  S.rows = [];
+  let rows = "";
+  if (sim) {
+    for (const m of sim.candidates) {
+      const i = S.rows.push(m) - 1;
+      const wse = m.win_se != null ? `<span class="se">±${m.win_se.toFixed(1)}</span>` : "";
+      const mse = m.margin_se != null ? `<span class="se">±${m.margin_se.toFixed(1)}</span>` : "";
+      const tip = m.pruned ? "Gallrad: klart sämre än bästa draget" : `Statiskt värde (poäng + leave): ${m.static}`;
+      rows += `<tr data-i="${i}" class="${moveKey(m) === chosenKey ? "chosen" : ""} ${m.pruned ? "pruned" : ""}" title="${esc(tip)}">
+        ${moveCells(m)}<td class="num">${m.win != null ? m.win.toFixed(1) + wse : "…"}</td>
+        <td class="num">${m.margin != null ? signed(m.margin) + mse : "…"}</td>
+        <td class="num muted">${m.n}</td></tr>`;
+    }
+  }
+  const simKeys = new Set(S.rows.map(moveKey));
+  const rest = a.moves.filter(m => !simKeys.has(moveKey(m)));
+  if (sim && rest.length) rows += `<tr class="sep"><td colspan="7">Ej simulerade drag (efter poäng)</td></tr>`;
+  for (const m of rest) {
+    const i = S.rows.push(m) - 1;
+    rows += `<tr data-i="${i}" class="${moveKey(m) === chosenKey ? "chosen" : ""}">
+      ${moveCells(m)}<td class="num muted">–</td><td class="num muted">–</td><td class="num muted">–</td></tr>`;
+  }
+  let simInfo = "";
+  if (sim) {
+    const st = sim.settings;
+    const state = { running: "pågår…", done: "klar", stopped: "stoppad", error: "fel", pending: "startar…" }[sim.status] || sim.status;
+    const pruned = sim.candidates.length - sim.active;
+    const target = sim.target_iterations != null ? `/${sim.target_iterations}` : "";
+    simInfo = `<div class="muted">Simulering ${state} · ${sim.iterations}${target} iterationer · ${sim.elapsed} s ·
+      ${sim.rollouts} rollouts (${sim.rate}/s) · ${st.opponent_model === "human" ? "mänsklig" : "perfekt"} motståndare ·
+      ${st.plies === 0 ? "till slutet" : st.plies + " drag framåt"}${pruned ? ` · ${pruned} gallrade` : ""}</div>`;
+    if (sim.time_limited) simInfo += `<div class="warn">Tidsgränsen ${st.max_seconds} s nåddes efter ${sim.iterations} iterationer – uppskattningen var för optimistisk.</div>`;
+    else if (sim.status === "done" && sim.active <= 1 && sim.candidates.length > 1 && sim.iterations < (sim.target_iterations || 0))
+      simInfo += `<div class="muted">Avslutad i förtid: alla andra drag gallrades bort som klart sämre.</div>`;
+    if (sim.error) simInfo += `<div class="error">${esc(sim.error)}</div>`;
+    for (const n of sim.notes || []) simInfo += `<div class="warn">${esc(n)}</div>`;
+  }
+  const notes = a.notes.map(n => `<div class="warn">${esc(n)}</div>`).join("")
+    + (S.simNote ? `<div class="muted">${esc(S.simNote)}</div>` : "");
+  const wrap = $("#analysis .tablewrap");
+  const scroll = wrap ? wrap.scrollTop : 0;
   $("#analysis").innerHTML = `
-    ${a.notes.map(n => `<div class="warn">${esc(n)}</div>`).join("")}
+    ${notes}
     <div class="muted">${a.total_plays} lagliga läggningar (visar topp ${Math.min(100, a.total_plays)}) · ${a.ms} ms</div>
+    ${simInfo}
     <div id="chosenbar" class="row" style="margin:6px 0"></div>
     <div class="tablewrap"><table>
       <thead><tr><th>Drag</th><th>Position</th><th class="num">Poäng</th><th>Kvar</th>
         <th class="num">Vinst %</th><th class="num">Marginal</th><th class="num">Sim.</th></tr></thead>
       <tbody>${rows}</tbody></table></div>`;
+  $("#analysis .tablewrap").scrollTop = scroll;
   $("#analysis tbody").onclick = e => {
-    const tr = e.target.closest("tr");
+    const tr = e.target.closest("tr[data-i]");
     if (!tr) return;
-    const m = a.moves[+tr.dataset.i];
-    S.chosen = S.chosen === m ? null : m;
+    const m = S.rows[+tr.dataset.i];
+    S.chosen = chosenKey === moveKey(m) ? null : m;
     renderAnalysis(); renderBoard();
   };
   renderChosenBar();
@@ -587,8 +849,8 @@ function renderChosenBar() {
         g = await api("POST", `/api/games/${S.id}/exchange`, { player: "me", tiles: m.exchanged });
         toast("Byte registrerat – fyll i dina nya brickor");
       }
-      S.chosen = null; S.analysis = null; S.sel = null; S.preview = null;
-      $("#analysis").innerHTML = "";
+      S.sel = null; S.preview = null;
+      clearAnalysis();
       await refreshGame(g);
       $("#rack").focus();
     } catch (e) { fail(e); }
